@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
@@ -22,20 +23,33 @@ export async function POST(request: Request) {
   const { searchParams } = new URL(request.url)
   const isTest = searchParams.get('test') === 'true'
   
+  // Check if this is a cron call (has authorization header with cron secret)
+  const authHeader = request.headers.get('authorization')
+  const isCronCall = authHeader === `Bearer ${process.env.CRON_SECRET}`
+  
   try {
-    const cookieStore = await cookies()
-    
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll()
+    // Use service role for cron calls, user session for manual calls
+    let supabase
+    if (isCronCall) {
+      supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        { auth: { autoRefreshToken: false, persistSession: false } }
+      )
+    } else {
+      const cookieStore = await cookies()
+      supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll()
+            },
           },
-        },
-      }
-    )
+        }
+      )
+    }
     
     // Get today's day name
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
