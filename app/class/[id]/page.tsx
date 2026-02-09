@@ -36,7 +36,8 @@ export default function ClassDetailPage() {
   const [loading, setLoading] = useState(true)
   const [classData, setClassData] = useState<ASPClass | null>(null)
   const [enrollments, setEnrollments] = useState<EnrollmentWithStudent[]>([])
-  const [absentStudents, setAbsentStudents] = useState<Set<number>>(new Set())
+  const [vcAbsentStudents, setVcAbsentStudents] = useState<Set<number>>(new Set())
+  const [manualAbsentStudents, setManualAbsentStudents] = useState<Set<number>>(new Set())
   const [allStudents, setAllStudents] = useState<Student[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -132,10 +133,22 @@ export default function ClassDetailPage() {
       .eq('attendance_date', today)
       .in('student_attendance_status', [29, 30, 72])
     
-    const absentSet = new Set(
+    const vcAbsentSet = new Set(
       attendanceData?.map(a => a.person_id) || []
     )
-    setAbsentStudents(absentSet)
+    setVcAbsentStudents(vcAbsentSet)
+    
+    // Check manual absences for today
+    const { data: manualAbsenceData } = await supabase
+      .from('asp_manual_absences')
+      .select('student_person_id')
+      .eq('class_id', classId)
+      .eq('absence_date', today)
+    
+    const manualAbsentSet = new Set(
+      manualAbsenceData?.map(a => a.student_person_id) || []
+    )
+    setManualAbsentStudents(manualAbsentSet)
     
     // Combine data
     const enrichedEnrollments = enrollmentData.map(enrollment => {
@@ -317,6 +330,43 @@ export default function ClassDetailPage() {
     setShowEditModal(true)
   }
 
+  async function toggleManualAbsence(studentPersonId: number) {
+    const supabase = createClient()
+    const today = new Date().toISOString().split('T')[0]
+    
+    if (manualAbsentStudents.has(studentPersonId)) {
+      // Remove manual absence
+      const { error } = await supabase
+        .from('asp_manual_absences')
+        .delete()
+        .eq('class_id', classId)
+        .eq('student_person_id', studentPersonId)
+        .eq('absence_date', today)
+      
+      if (!error) {
+        setManualAbsentStudents(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(studentPersonId)
+          return newSet
+        })
+      }
+    } else {
+      // Add manual absence
+      const { error } = await supabase
+        .from('asp_manual_absences')
+        .insert({
+          class_id: classId,
+          student_person_id: studentPersonId,
+          absence_date: today,
+          marked_by: user?.email
+        })
+      
+      if (!error) {
+        setManualAbsentStudents(prev => new Set([...prev, studentPersonId]))
+      }
+    }
+  }
+
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
@@ -409,10 +459,15 @@ export default function ClassDetailPage() {
           </div>
           
           {/* Absent Alert */}
-          {absentStudents.size > 0 && (
+          {(vcAbsentStudents.size > 0 || manualAbsentStudents.size > 0) && (
             <div className="p-3 bg-red-50 border-b border-red-100">
               <p className="text-sm text-red-700 font-medium">
-                ⚠️ {absentStudents.size} student{absentStudents.size > 1 ? 's' : ''} marked absent today
+                ⚠️ {new Set([...vcAbsentStudents, ...manualAbsentStudents]).size} student{(vcAbsentStudents.size + manualAbsentStudents.size) !== 1 ? 's' : ''} marked absent today
+                {vcAbsentStudents.size > 0 && manualAbsentStudents.size > 0 && (
+                  <span className="font-normal ml-1">
+                    ({vcAbsentStudents.size} from Veracross, {manualAbsentStudents.size} manual)
+                  </span>
+                )}
               </p>
             </div>
           )}
@@ -427,7 +482,9 @@ export default function ClassDetailPage() {
           ) : (
             <div className="divide-y divide-slate-100">
               {enrollments.map(enrollment => {
-                const isAbsent = absentStudents.has(enrollment.student_person_id)
+                const isVcAbsent = vcAbsentStudents.has(enrollment.student_person_id)
+                const isManualAbsent = manualAbsentStudents.has(enrollment.student_person_id)
+                const isAbsent = isVcAbsent || isManualAbsent
                 return (
                 <div
                   key={enrollment.id}
@@ -436,11 +493,27 @@ export default function ClassDetailPage() {
                   }`}
                 >
                   <div className="flex items-center gap-4">
+                    {/* Absence Toggle Button */}
+                    <button
+                      onClick={() => toggleManualAbsence(enrollment.student_person_id)}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                        isAbsent
+                          ? 'bg-red-500 text-white hover:bg-red-600'
+                          : 'bg-green-500 text-white hover:bg-green-600'
+                      }`}
+                      title={isAbsent ? 'Mark Present' : 'Mark Absent'}
+                    >
+                      {isAbsent ? '✗' : '✓'}
+                    </button>
+                    
                     <div>
                       <p className={`font-medium ${isAbsent ? 'text-red-700' : 'text-slate-900'}`}>
-                        {isAbsent && '⚠️ '}
                         {enrollment.student.last_name}, {enrollment.student.first_name}
-                        {isAbsent && <span className="text-xs ml-2 text-red-600">(ABSENT)</span>}
+                        {isAbsent && (
+                          <span className="text-xs ml-2 text-red-600">
+                            ({isVcAbsent ? 'VC ABSENT' : 'MANUAL'})
+                          </span>
+                        )}
                       </p>
                       <p className="text-sm text-slate-500">
                         Grade {enrollment.student.grade_level}
