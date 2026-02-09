@@ -20,9 +20,17 @@ export async function POST(request: Request) {
   const isTest = searchParams.get('test') === 'true'
   
   try {
+    // Check for required env vars
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      return NextResponse.json({ error: 'Supabase URL not configured' }, { status: 500 })
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
+    }
+    
     const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
     )
     
     // Get today's day name
@@ -37,11 +45,15 @@ export async function POST(request: Request) {
     const targetDay = isTest ? 'Monday' : today // Use Monday for test
     
     // Get email recipients
-    const { data: recipients } = await supabase
+    const { data: recipients, error: recipientsError } = await supabase
       .from('asp_users')
       .select('email, name')
       .eq('is_active', true)
       .eq('receives_daily_email', true)
+    
+    if (recipientsError) {
+      return NextResponse.json({ error: `Database error: ${recipientsError.message}` }, { status: 500 })
+    }
     
     if (!recipients || recipients.length === 0) {
       return NextResponse.json({ error: 'No email recipients configured' }, { status: 400 })
