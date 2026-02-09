@@ -13,8 +13,10 @@ import {
   TrashIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ClockIcon
+  ClockIcon,
+  PencilIcon
 } from '@heroicons/react/24/outline'
+import { StaffLookup } from '@/components/StaffLookup'
 
 interface ASPUser {
   id: string
@@ -48,9 +50,14 @@ export default function AdminPage() {
   const [aspUsers, setAspUsers] = useState<ASPUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [showAddUser, setShowAddUser] = useState(false)
-  const [newUserEmail, setNewUserEmail] = useState('')
-  const [newUserName, setNewUserName] = useState('')
+  const [selectedStaff, setSelectedStaff] = useState<{ person_id: number; first_name: string; last_name: string; email: string } | null>(null)
+  const [newUserReceivesEmail, setNewUserReceivesEmail] = useState(false)
   const [savingUser, setSavingUser] = useState(false)
+  
+  // Edit user state
+  const [editingUser, setEditingUser] = useState<ASPUser | null>(null)
+  const [editReceivesEmail, setEditReceivesEmail] = useState(false)
+  const [editIsActive, setEditIsActive] = useState(true)
   
   // Sync state
   const [syncing, setSyncing] = useState(false)
@@ -133,42 +140,61 @@ export default function AdminPage() {
   }
 
   async function handleAddUser() {
-    if (!newUserEmail.trim()) return
+    if (!selectedStaff) return
     
     setSavingUser(true)
     const supabase = createClient()
     
     const { error } = await supabase.from('asp_users').insert({
-      email: newUserEmail.toLowerCase().trim(),
-      name: newUserName.trim() || null,
+      email: selectedStaff.email.toLowerCase().trim(),
+      name: `${selectedStaff.first_name} ${selectedStaff.last_name}`,
       is_active: true,
-      receives_daily_email: false
+      receives_daily_email: newUserReceivesEmail
     })
     
     if (error) {
       alert(error.message.includes('duplicate') 
-        ? 'This email already exists.' 
+        ? 'This staff member already has access.' 
         : 'Failed to add user.')
     } else {
       setShowAddUser(false)
-      setNewUserEmail('')
-      setNewUserName('')
+      setSelectedStaff(null)
+      setNewUserReceivesEmail(false)
       loadASPUsers()
     }
     
     setSavingUser(false)
   }
 
-  async function handleToggleActive(aspUser: ASPUser) {
+  function openEditUser(aspUser: ASPUser) {
+    setEditingUser(aspUser)
+    setEditReceivesEmail(aspUser.receives_daily_email)
+    setEditIsActive(aspUser.is_active)
+  }
+
+  async function handleSaveEdit() {
+    if (!editingUser) return
+    
+    setSavingUser(true)
     const supabase = createClient()
+    
     const { error } = await supabase
       .from('asp_users')
-      .update({ is_active: !aspUser.is_active, updated_at: new Date().toISOString() })
-      .eq('id', aspUser.id)
+      .update({ 
+        is_active: editIsActive, 
+        receives_daily_email: editReceivesEmail,
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', editingUser.id)
     
     if (!error) {
+      setEditingUser(null)
       loadASPUsers()
+    } else {
+      alert('Failed to update user.')
     }
+    
+    setSavingUser(false)
   }
 
   async function handleToggleEmail(aspUser: ASPUser) {
@@ -366,8 +392,7 @@ export default function AdminPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => handleToggleActive(aspUser)}
+                      <span
                         className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
                           aspUser.is_active
                             ? 'bg-green-100 text-green-700'
@@ -379,10 +404,23 @@ export default function AdminPage() {
                         ) : (
                           <><XCircleIcon className="w-3 h-3" /> Inactive</>
                         )}
+                      </span>
+                      {aspUser.receives_daily_email && (
+                        <span className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                          <EnvelopeIcon className="w-3 h-3" /> Email
+                        </span>
+                      )}
+                      <button
+                        onClick={() => openEditUser(aspUser)}
+                        className="p-2 text-slate-400 hover:text-shefa-blue rounded hover:bg-slate-100"
+                        title="Edit user"
+                      >
+                        <PencilIcon className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDeleteUser(aspUser)}
                         className="p-2 text-slate-400 hover:text-red-600 rounded hover:bg-red-50"
+                        title="Delete user"
                       >
                         <TrashIcon className="w-4 h-4" />
                       </button>
@@ -564,29 +602,43 @@ export default function AdminPage() {
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Email Address *
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Search Staff *
                 </label>
-                <input
-                  type="email"
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="user@shefaschool.org"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-shefa-blue focus:border-transparent"
-                />
+                {selectedStaff ? (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    <div>
+                      <p className="font-medium text-slate-900">
+                        {selectedStaff.first_name} {selectedStaff.last_name}
+                      </p>
+                      <p className="text-sm text-slate-500">{selectedStaff.email}</p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedStaff(null)}
+                      className="text-slate-400 hover:text-slate-600"
+                    >
+                      <XCircleIcon className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <StaffLookup
+                    onSelect={(staff) => setSelectedStaff(staff)}
+                    placeholder="Type to search staff by name or email..."
+                  />
+                )}
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Name (optional)
-                </label>
+              <div className="flex items-center gap-3 pt-2">
                 <input
-                  type="text"
-                  value={newUserName}
-                  onChange={(e) => setNewUserName(e.target.value)}
-                  placeholder="Full Name"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-shefa-blue focus:border-transparent"
+                  type="checkbox"
+                  id="receives-email"
+                  checked={newUserReceivesEmail}
+                  onChange={(e) => setNewUserReceivesEmail(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-shefa-blue focus:ring-shefa-blue"
                 />
+                <label htmlFor="receives-email" className="text-sm text-slate-700">
+                  Receives daily roster email
+                </label>
               </div>
             </div>
             
@@ -594,8 +646,8 @@ export default function AdminPage() {
               <button
                 onClick={() => {
                   setShowAddUser(false)
-                  setNewUserEmail('')
-                  setNewUserName('')
+                  setSelectedStaff(null)
+                  setNewUserReceivesEmail(false)
                 }}
                 className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
               >
@@ -603,10 +655,68 @@ export default function AdminPage() {
               </button>
               <button
                 onClick={handleAddUser}
-                disabled={!newUserEmail.trim() || savingUser}
+                disabled={!selectedStaff || savingUser}
                 className="px-4 py-2 bg-shefa-blue text-white rounded-lg hover:bg-shefa-blue/90 disabled:opacity-50"
               >
                 {savingUser ? 'Adding...' : 'Add User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Edit User Modal */}
+      {editingUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Edit User</h3>
+            
+            <div className="mb-4 p-3 bg-slate-50 rounded-lg">
+              <p className="font-medium text-slate-900">{editingUser.name || editingUser.email}</p>
+              <p className="text-sm text-slate-500">{editingUser.email}</p>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="edit-active"
+                  checked={editIsActive}
+                  onChange={(e) => setEditIsActive(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-shefa-blue focus:ring-shefa-blue"
+                />
+                <label htmlFor="edit-active" className="text-sm text-slate-700">
+                  Active (can access portal)
+                </label>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="edit-email"
+                  checked={editReceivesEmail}
+                  onChange={(e) => setEditReceivesEmail(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-shefa-blue focus:ring-shefa-blue"
+                />
+                <label htmlFor="edit-email" className="text-sm text-slate-700">
+                  Receives daily roster email
+                </label>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setEditingUser(null)}
+                className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={savingUser}
+                className="px-4 py-2 bg-shefa-blue text-white rounded-lg hover:bg-shefa-blue/90 disabled:opacity-50"
+              >
+                {savingUser ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
