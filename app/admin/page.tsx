@@ -229,17 +229,19 @@ export default function AdminPage() {
     setSyncResult(null)
     
     try {
-      const response = await fetch('/api/sync', { method: 'POST' })
+      const response = await fetch('/api/sync-asp-data', { method: 'POST' })
       const result = await response.json()
       
       if (response.ok) {
-        setSyncResult(`Sync complete: ${result.classesUpdated} classes, ${result.enrollmentsUpdated} enrollments updated.`)
+        const classStats = `Classes: ${result.classes.inserted} new, ${result.classes.updated} updated, ${result.classes.deactivated} deactivated`
+        const enrollStats = `Enrollments: ${result.enrollments.upserted} synced, ${result.enrollments.deactivated} deactivated`
+        setSyncResult(`✓ Sync complete in ${result.duration_ms}ms. ${classStats}. ${enrollStats}.`)
         loadLastSync()
       } else {
-        setSyncResult(`Sync failed: ${result.error}`)
+        setSyncResult(`✗ Sync failed: ${result.error || result.details}`)
       }
     } catch (err) {
-      setSyncResult('Sync failed: Network error')
+      setSyncResult('✗ Sync failed: Network error')
     }
     
     setSyncing(false)
