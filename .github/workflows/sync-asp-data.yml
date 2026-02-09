@@ -1,0 +1,43 @@
+name: Sync ASP Data
+
+on:
+  schedule:
+    # Run at 8:15 AM ET (13:15 UTC) Monday-Friday
+    # This is after BigQuery data refreshes (~7:30 AM ET)
+    - cron: '15 13 * * 1-5'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: vc-data-1-project
+      
+      - name: Run ASP Data Sync
+        env:
+          SUPABASE_URL: https://rkfwphowryckqkozscfi.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node scripts/sync-asp-data.js
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "ASP sync failed! Check the logs above for details."

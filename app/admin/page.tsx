@@ -153,9 +153,10 @@ export default function AdminPage() {
     })
     
     if (error) {
+      console.error('Add user error:', error)
       alert(error.message.includes('duplicate') 
         ? 'This staff member already has access.' 
-        : 'Failed to add user.')
+        : `Failed to add user: ${error.message}`)
     } else {
       setShowAddUser(false)
       setSelectedStaff(null)
