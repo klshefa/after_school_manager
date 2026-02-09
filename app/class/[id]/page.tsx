@@ -14,7 +14,9 @@ import {
   UserGroupIcon,
   CalendarDaysIcon,
   ExclamationTriangleIcon,
-  CheckCircleIcon
+  CheckCircleIcon,
+  PrinterIcon,
+  EnvelopeIcon
 } from '@heroicons/react/24/outline'
 
 type EnrollmentType = 'enrolled' | 'registered' | 'trial' | 'financial_aid' | 'drop_in'
@@ -373,6 +375,122 @@ export default function ClassDetailPage() {
     router.push('/')
   }
 
+  function handlePrintRoster() {
+    const today = new Date().toLocaleDateString('en-US', { 
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+    })
+    
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return
+    
+    const allAbsent = new Set([...vcAbsentStudents, ...manualAbsentStudents])
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>${classData?.class_name || 'Class'} Roster - ${today}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          h1 { font-size: 18px; margin-bottom: 5px; }
+          h2 { font-size: 14px; color: #666; margin-top: 0; }
+          .meta { color: #666; font-size: 12px; margin-bottom: 15px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+          th { background: #f5f5f5; font-weight: bold; }
+          .absent { background: #fee; }
+          .absent-label { color: #c00; font-weight: bold; }
+          .count { margin-top: 15px; font-size: 12px; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>${classData?.class_name || 'Class Roster'}</h1>
+        <h2>${classData?.vc_class_id}</h2>
+        <div class="meta">
+          <strong>${classData?.day_of_week}</strong> • 
+          ${classData?.start_time && classData?.end_time 
+            ? formatTime(classData.start_time) + ' - ' + formatTime(classData.end_time) 
+            : 'Time TBD'}
+          ${classData?.instructor && classData.instructor !== 'None' ? ' • ' + classData.instructor : ''}
+        </div>
+        <div class="meta"><strong>Date:</strong> ${today}</div>
+        
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 30px">#</th>
+              <th>Student Name</th>
+              <th>Grade</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${enrollments.map((e, i) => {
+              const isAbsent = allAbsent.has(e.student_person_id)
+              const isVcAbsent = vcAbsentStudents.has(e.student_person_id)
+              return `
+                <tr class="${isAbsent ? 'absent' : ''}">
+                  <td>${i + 1}</td>
+                  <td>${e.student.last_name}, ${e.student.first_name}</td>
+                  <td>${e.student.grade_level}</td>
+                  <td>${ENROLLMENT_TYPE_LABELS[e.enrollment_type as EnrollmentType]?.label || e.enrollment_type}</td>
+                  <td>${isAbsent ? '<span class="absent-label">ABSENT' + (isVcAbsent ? ' (VC)' : ' (Manual)') + '</span>' : 'Present'}</td>
+                  <td>${e.notes || ''}</td>
+                </tr>
+              `
+            }).join('')}
+          </tbody>
+        </table>
+        
+        <div class="count">
+          <strong>Total:</strong> ${enrollments.length} students • 
+          <strong>Present:</strong> ${enrollments.length - allAbsent.size} • 
+          <strong>Absent:</strong> ${allAbsent.size}
+        </div>
+        
+        <script>window.onload = function() { window.print(); }</script>
+      </body>
+      </html>
+    `
+    
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }
+
+  async function handleEmailRoster() {
+    if (!user?.email) return
+    
+    const allAbsent = new Set([...vcAbsentStudents, ...manualAbsentStudents])
+    const today = new Date().toLocaleDateString('en-US', { 
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+    })
+    
+    // Build roster text
+    const presentStudents = enrollments.filter(e => !allAbsent.has(e.student_person_id))
+    const absentStudentsList = enrollments.filter(e => allAbsent.has(e.student_person_id))
+    
+    const rosterText = `
+${classData?.class_name || 'Class Roster'}
+${classData?.day_of_week} • ${classData?.start_time && classData?.end_time ? formatTime(classData.start_time) + ' - ' + formatTime(classData.end_time) : 'Time TBD'}
+Date: ${today}
+
+PRESENT (${presentStudents.length}):
+${presentStudents.map((e, i) => `${i + 1}. ${e.student.last_name}, ${e.student.first_name} (Gr ${e.student.grade_level})`).join('\n')}
+
+${absentStudentsList.length > 0 ? `ABSENT (${absentStudentsList.length}):\n${absentStudentsList.map(e => `• ${e.student.last_name}, ${e.student.first_name} (Gr ${e.student.grade_level})`).join('\n')}` : 'No absences'}
+
+Total: ${enrollments.length} students
+    `.trim()
+    
+    // Open email client
+    const subject = encodeURIComponent(`${classData?.class_name || 'Class'} Roster - ${today}`)
+    const body = encodeURIComponent(rosterText)
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
+  }
+
   // Filter students not already enrolled
   const enrolledStudentIds = enrollments.map(e => e.student_person_id)
   const availableStudents = allStudents.filter(s => 
@@ -449,13 +567,31 @@ export default function ClassDetailPage() {
                 Roster ({enrollments.length} students)
               </h2>
             </div>
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-shefa-blue text-white rounded-lg hover:bg-shefa-blue/90 transition-colors"
-            >
-              <PlusIcon className="w-4 h-4" />
-              Add Student
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handlePrintRoster}
+                className="flex items-center gap-2 px-3 py-2 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Print Roster"
+              >
+                <PrinterIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Print</span>
+              </button>
+              <button
+                onClick={handleEmailRoster}
+                className="flex items-center gap-2 px-3 py-2 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Email Roster"
+              >
+                <EnvelopeIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Email</span>
+              </button>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-shefa-blue text-white rounded-lg hover:bg-shefa-blue/90 transition-colors"
+              >
+                <PlusIcon className="w-4 h-4" />
+                Add Student
+              </button>
+            </div>
           </div>
           
           {/* Absent Alert */}
