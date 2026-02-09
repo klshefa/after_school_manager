@@ -147,16 +147,26 @@ export default function AdminPage() {
       }
     }
     
-    // Get last attendance sync from master_attendance (most recent updated_at)
+    // Get most recent attendance date from master_attendance
     const { data: attendanceData } = await supabase
       .from('master_attendance')
-      .select('updated_at')
-      .order('updated_at', { ascending: false })
+      .select('attendance_date')
+      .order('attendance_date', { ascending: false })
       .limit(1)
       .single()
     
-    if (attendanceData?.updated_at) {
-      setLastAttendanceSync(new Date(attendanceData.updated_at).toLocaleString())
+    if (attendanceData?.attendance_date) {
+      const attDate = new Date(attendanceData.attendance_date + 'T00:00:00')
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      
+      if (attDate.getTime() === today.getTime()) {
+        setLastAttendanceSync("Today's data available ✓")
+      } else if (attDate.getTime() === today.getTime() - 86400000) {
+        setLastAttendanceSync("Yesterday's data (today pending)")
+      } else {
+        setLastAttendanceSync(`Last data: ${attDate.toLocaleDateString()}`)
+      }
     }
     
     // Get last sync stats from audit log
