@@ -147,25 +147,31 @@ export default function AdminPage() {
       }
     }
     
-    // Get most recent attendance date from master_attendance
+    // Get last attendance update time for today's records
+    const today = new Date().toISOString().split('T')[0]
     const { data: attendanceData } = await supabase
       .from('master_attendance')
-      .select('attendance_date')
-      .order('attendance_date', { ascending: false })
+      .select('updated_at')
+      .eq('attendance_date', today)
+      .order('updated_at', { ascending: false })
       .limit(1)
       .single()
     
-    if (attendanceData?.attendance_date) {
-      const attDate = new Date(attendanceData.attendance_date + 'T00:00:00')
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
+    if (attendanceData?.updated_at) {
+      setLastAttendanceSync(new Date(attendanceData.updated_at).toLocaleString())
+    } else {
+      // No data for today yet - check most recent date
+      const { data: latestData } = await supabase
+        .from('master_attendance')
+        .select('attendance_date')
+        .order('attendance_date', { ascending: false })
+        .limit(1)
+        .single()
       
-      if (attDate.getTime() === today.getTime()) {
-        setLastAttendanceSync("Today's data available ✓")
-      } else if (attDate.getTime() === today.getTime() - 86400000) {
-        setLastAttendanceSync("Yesterday's data (today pending)")
+      if (latestData?.attendance_date) {
+        setLastAttendanceSync(`No data for today (last: ${new Date(latestData.attendance_date + 'T00:00:00').toLocaleDateString()})`)
       } else {
-        setLastAttendanceSync(`Last data: ${attDate.toLocaleDateString()}`)
+        setLastAttendanceSync('No data')
       }
     }
     
