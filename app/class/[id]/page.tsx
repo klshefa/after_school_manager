@@ -36,6 +36,7 @@ export default function ClassDetailPage() {
   const [loading, setLoading] = useState(true)
   const [classData, setClassData] = useState<ASPClass | null>(null)
   const [enrollments, setEnrollments] = useState<EnrollmentWithStudent[]>([])
+  const [absentStudents, setAbsentStudents] = useState<Set<number>>(new Set())
   const [allStudents, setAllStudents] = useState<Student[]>([])
   const [showAddModal, setShowAddModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -121,6 +122,19 @@ export default function ClassDetailPage() {
       return
     }
     
+    // Check today's attendance
+    const today = new Date().toISOString().split('T')[0]
+    const { data: attendanceData } = await supabase
+      .from('attendance')
+      .select('person_id, status')
+      .in('person_id', studentIds)
+      .eq('date', today)
+    
+    const absentSet = new Set(
+      attendanceData?.filter(a => a.status === 'Absent').map(a => a.person_id) || []
+    )
+    setAbsentStudents(absentSet)
+    
     // Combine data
     const enrichedEnrollments = enrollmentData.map(enrollment => {
       const student = studentData?.find(s => s.person_id === enrollment.student_person_id)
@@ -166,7 +180,10 @@ export default function ClassDetailPage() {
     setSaving(true)
     const supabase = createClient()
     
-    const { error } = await supabase.from('asp_enrollments').insert({
+    const student = allStudents.find(s => s.person_id === newStudentId)
+    const studentName = student ? `${student.first_name} ${student.last_name}` : 'Unknown'
+    
+    const { data, error } = await supabase.from('asp_enrollments').insert({
       class_id: classId,
       student_person_id: newStudentId,
       status: 'active',
@@ -178,12 +195,25 @@ export default function ClassDetailPage() {
       notes: newNotes || null,
       created_by: user.email,
       updated_by: user.email
-    })
+    }).select('id').single()
     
     if (error) {
       console.error('Error adding student:', error)
       alert('Failed to add student. They may already be enrolled.')
     } else {
+      // Log to audit
+      await supabase.from('asp_audit_log').insert({
+        table_name: 'asp_enrollments',
+        record_id: data?.id,
+        action: 'insert',
+        changed_by: user.email,
+        new_values: { 
+          student: studentName, 
+          enrollment_type: newEnrollmentType,
+          notes: newNotes || null 
+        }
+      })
+      
       setShowAddModal(false)
       setNewStudentId(null)
       setNewEnrollmentType('drop_in')
@@ -216,6 +246,17 @@ export default function ClassDetailPage() {
       console.error('Error removing student:', error)
       alert('Failed to remove student.')
     } else {
+      // Log to audit
+      await supabase.from('asp_audit_log').insert({
+        table_name: 'asp_enrollments',
+        record_id: enrollment.id,
+        action: 'delete',
+        changed_by: user?.email,
+        old_values: { 
+          student: `${enrollment.student.first_name} ${enrollment.student.last_name}`,
+          enrollment_type: enrollment.enrollment_type
+        }
+      })
       loadEnrollments()
     }
   }
@@ -241,6 +282,23 @@ export default function ClassDetailPage() {
       console.error('Error updating enrollment:', error)
       alert('Failed to update enrollment.')
     } else {
+      // Log to audit
+      await supabase.from('asp_audit_log').insert({
+        table_name: 'asp_enrollments',
+        record_id: selectedEnrollment.id,
+        action: 'update',
+        changed_by: user.email,
+        old_values: {
+          enrollment_type: selectedEnrollment.enrollment_type,
+          notes: selectedEnrollment.notes
+        },
+        new_values: {
+          student: `${selectedEnrollment.student.first_name} ${selectedEnrollment.student.last_name}`,
+          enrollment_type: newEnrollmentType,
+          notes: newNotes || null
+        }
+      })
+      
       setShowEditModal(false)
       setSelectedEnrollment(null)
       loadEnrollments()
@@ -348,6 +406,15 @@ export default function ClassDetailPage() {
             </button>
           </div>
           
+          {/* Absent Alert */}
+          {absentStudents.size > 0 && (
+            <div className="p-3 bg-red-50 border-b border-red-100">
+              <p className="text-sm text-red-700 font-medium">
+                ⚠️ {absentStudents.size} student{absentStudents.size > 1 ? 's' : ''} marked absent today
+              </p>
+            </div>
+          )}
+          
           {/* Roster List */}
           {enrollments.length === 0 ? (
             <div className="p-8 text-center text-slate-500">
@@ -357,15 +424,21 @@ export default function ClassDetailPage() {
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {enrollments.map(enrollment => (
+              {enrollments.map(enrollment => {
+                const isAbsent = absentStudents.has(enrollment.student_person_id)
+                return (
                 <div
                   key={enrollment.id}
-                  className="flex items-center justify-between p-4 hover:bg-slate-50"
+                  className={`flex items-center justify-between p-4 hover:bg-slate-50 ${
+                    isAbsent ? 'bg-red-50' : ''
+                  }`}
                 >
                   <div className="flex items-center gap-4">
                     <div>
-                      <p className="font-medium text-slate-900">
+                      <p className={`font-medium ${isAbsent ? 'text-red-700' : 'text-slate-900'}`}>
+                        {isAbsent && '⚠️ '}
                         {enrollment.student.last_name}, {enrollment.student.first_name}
+                        {isAbsent && <span className="text-xs ml-2 text-red-600">(ABSENT)</span>}
                       </p>
                       <p className="text-sm text-slate-500">
                         Grade {enrollment.student.grade_level}
@@ -415,7 +488,7 @@ export default function ClassDetailPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </div>
