@@ -62,6 +62,16 @@ export default function AdminPage() {
   // Sync state
   const [syncing, setSyncing] = useState(false)
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const [lastSyncStats, setLastSyncStats] = useState<{
+    classes_inserted?: number
+    classes_updated?: number
+    classes_deactivated?: number
+    enrollments_upserted?: number
+    enrollments_deactivated?: number
+    duration_ms?: number
+    total_classes?: number
+    total_enrollments?: number
+  } | null>(null)
   const [syncResult, setSyncResult] = useState<string | null>(null)
   
   // Audit log state
@@ -112,16 +122,55 @@ export default function AdminPage() {
 
   async function loadLastSync() {
     const supabase = createClient()
-    const { data } = await supabase
-      .from('asp_classes')
+    
+    // Get last sync timestamp from system status
+    const { data: statusData } = await supabase
+      .from('asp_system_status')
       .select('last_vc_sync')
-      .order('last_vc_sync', { ascending: false })
+      .eq('id', 1)
+      .single()
+    
+    if (statusData?.last_vc_sync) {
+      setLastSync(new Date(statusData.last_vc_sync).toLocaleString())
+    } else {
+      // Fallback to checking asp_classes
+      const { data: classData } = await supabase
+        .from('asp_classes')
+        .select('last_vc_sync')
+        .order('last_vc_sync', { ascending: false })
+        .limit(1)
+        .single()
+      
+      if (classData?.last_vc_sync) {
+        setLastSync(new Date(classData.last_vc_sync).toLocaleString())
+      }
+    }
+    
+    // Get last sync stats from audit log
+    const { data: auditData } = await supabase
+      .from('asp_audit_log')
+      .select('new_value, changed_at')
+      .eq('action', 'sync')
+      .eq('entity_type', 'system')
+      .order('changed_at', { ascending: false })
       .limit(1)
       .single()
     
-    if (data?.last_vc_sync) {
-      setLastSync(new Date(data.last_vc_sync).toLocaleString())
+    if (auditData?.new_value) {
+      setLastSyncStats(auditData.new_value as typeof lastSyncStats)
     }
+    
+    // Get current counts
+    const [{ count: classCount }, { count: enrollmentCount }] = await Promise.all([
+      supabase.from('asp_classes').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabase.from('asp_enrollments').select('*', { count: 'exact', head: true }).eq('status', 'active')
+    ])
+    
+    setLastSyncStats(prev => ({
+      ...prev,
+      total_classes: classCount || 0,
+      total_enrollments: enrollmentCount || 0
+    }))
   }
   
   async function loadAuditLogs() {
@@ -507,19 +556,72 @@ export default function AdminPage() {
             <h2 className="font-semibold text-slate-900 mb-4">Veracross Data Sync</h2>
             
             <div className="space-y-4">
+              {/* Last Sync Info */}
               <div className="bg-slate-50 rounded-lg p-4">
-                <p className="text-sm text-slate-600">
-                  <span className="font-medium">Last Sync:</span>{' '}
-                  {lastSync || 'Never'}
-                </p>
-                <p className="text-sm text-slate-500 mt-1">
-                  Data is automatically synced daily at 6:00 AM from BigQuery
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-slate-600">
+                    <span className="font-medium">Last Sync:</span>{' '}
+                    {lastSync || 'Never'}
+                  </p>
+                  {lastSyncStats?.duration_ms && (
+                    <span className="text-xs text-slate-400">
+                      Completed in {(lastSyncStats.duration_ms / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-slate-500">
+                  Data is automatically synced daily at 8:15 AM ET from BigQuery
                 </p>
               </div>
               
+              {/* Current Data Stats */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-blue-700">
+                    {lastSyncStats?.total_classes ?? '—'}
+                  </p>
+                  <p className="text-sm text-blue-600">Active Classes</p>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-green-700">
+                    {lastSyncStats?.total_enrollments ?? '—'}
+                  </p>
+                  <p className="text-sm text-green-600">Active Enrollments</p>
+                </div>
+              </div>
+              
+              {/* Last Sync Results */}
+              {lastSyncStats && (lastSyncStats.classes_inserted !== undefined || lastSyncStats.enrollments_upserted !== undefined) && (
+                <div className="bg-slate-50 rounded-lg p-4">
+                  <h3 className="font-medium text-slate-900 mb-2 text-sm">Last Sync Results:</h3>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-600">
+                    <div className="flex justify-between">
+                      <span>Classes added:</span>
+                      <span className="font-medium">{lastSyncStats.classes_inserted ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Enrollments synced:</span>
+                      <span className="font-medium">{lastSyncStats.enrollments_upserted ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Classes updated:</span>
+                      <span className="font-medium">{lastSyncStats.classes_updated ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Enrollments removed:</span>
+                      <span className="font-medium">{lastSyncStats.enrollments_deactivated ?? 0}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Classes deactivated:</span>
+                      <span className="font-medium">{lastSyncStats.classes_deactivated ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {syncResult && (
                 <div className={`p-4 rounded-lg ${
-                  syncResult.includes('failed') 
+                  syncResult.includes('✗') 
                     ? 'bg-red-50 text-red-700' 
                     : 'bg-green-50 text-green-700'
                 }`}>
@@ -539,8 +641,8 @@ export default function AdminPage() {
               <div className="mt-6 pt-6 border-t border-slate-200">
                 <h3 className="font-medium text-slate-900 mb-2">What gets synced:</h3>
                 <ul className="text-sm text-slate-600 space-y-1">
-                  <li>• Classes from BigQuery asp_class_list</li>
-                  <li>• Enrollments from BigQuery asp_rosters</li>
+                  <li>• Classes from BigQuery <code className="bg-slate-100 px-1 rounded">asp_class_list</code></li>
+                  <li>• Enrollments from BigQuery <code className="bg-slate-100 px-1 rounded">asp_rosters</code></li>
                   <li>• New students are added, removed students are marked inactive</li>
                   <li>• Manual additions (trials, drop-ins, etc.) are preserved</li>
                 </ul>
