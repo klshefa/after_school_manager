@@ -14,6 +14,7 @@ interface ClassRoster {
     grade: number
     enrollmentType: string
     notes: string | null
+    isAbsent?: boolean
   }[]
 }
 
@@ -89,6 +90,17 @@ export async function POST(request: Request) {
       .select('person_id, first_name, last_name, grade_level')
       .in('person_id', studentIds)
     
+    // Check today's attendance from master_attendance
+    // Status codes 29, 30, 72 = absent in Veracross
+    const today = new Date().toISOString().split('T')[0]
+    const { data: attendanceData } = await supabase
+      .from('master_attendance')
+      .select('person_id, student_attendance_status')
+      .in('person_id', studentIds)
+      .eq('attendance_date', today)
+      .in('student_attendance_status', [29, 30, 72])
+    
+    const absentStudents = new Set(attendanceData?.map(a => a.person_id) || [])
     const studentMap = new Map(students?.map(s => [s.person_id, s]) || [])
     
     // Build roster data
@@ -100,7 +112,8 @@ export async function POST(request: Request) {
           name: student ? `${student.last_name}, ${student.first_name}` : 'Unknown Student',
           grade: student?.grade_level || 0,
           enrollmentType: e.enrollment_type || 'enrolled',
-          notes: e.notes
+          notes: e.notes,
+          isAbsent: absentStudents.has(e.student_person_id)
         }
       }).sort((a, b) => a.name.localeCompare(b.name))
       
@@ -176,13 +189,21 @@ function formatTime(start: string | null, end: string | null): string {
 function buildEmailHtml(day: string, rosters: ClassRoster[], isTest: boolean): string {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://afterschool.shefaschool.org'
   
-  const classesHtml = rosters.map(roster => `
+  const classesHtml = rosters.map(roster => {
+    const absentCount = roster.students.filter(s => s.isAbsent).length
+    
+    return `
     <div style="margin-bottom: 24px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
       <div style="background: #164a7a; color: white; padding: 12px 16px;">
         <h3 style="margin: 0; font-size: 16px;">${roster.className}</h3>
         <p style="margin: 4px 0 0; font-size: 14px; opacity: 0.8;">${roster.time}</p>
       </div>
       <div style="padding: 16px;">
+        ${absentCount > 0 ? `
+          <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px;">
+            <strong style="color: #dc2626;">⚠️ ${absentCount} student${absentCount > 1 ? 's' : ''} marked absent today</strong>
+          </div>
+        ` : ''}
         ${roster.students.length === 0 
           ? '<p style="color: #64748b; margin: 0;">No students enrolled</p>'
           : `
@@ -190,15 +211,18 @@ function buildEmailHtml(day: string, rosters: ClassRoster[], isTest: boolean): s
               <thead>
                 <tr style="border-bottom: 1px solid #e2e8f0;">
                   <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #64748b;">Student</th>
-                  <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #64748b;">Grade</th>
+                  <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #64748b;">Gr</th>
                   <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #64748b;">Type</th>
                   <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #64748b;">Notes</th>
                 </tr>
               </thead>
               <tbody>
                 ${roster.students.map(s => `
-                  <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 8px 0; font-size: 14px;">${s.name}</td>
+                  <tr style="border-bottom: 1px solid #f1f5f9; ${s.isAbsent ? 'background: #fef2f2;' : ''}">
+                    <td style="padding: 8px 0; font-size: 14px;">
+                      ${s.isAbsent ? '⚠️ ' : ''}${s.name}
+                      ${s.isAbsent ? '<span style="color: #dc2626; font-size: 12px;"> (ABSENT)</span>' : ''}
+                    </td>
                     <td style="padding: 8px 0; font-size: 14px;">${s.grade}</td>
                     <td style="padding: 8px 0; font-size: 14px;">
                       <span style="background: ${getTypeColor(s.enrollmentType)}; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
@@ -218,7 +242,7 @@ function buildEmailHtml(day: string, rosters: ClassRoster[], isTest: boolean): s
         </p>
       </div>
     </div>
-  `).join('')
+  `}).join('')
   
   return `
     <!DOCTYPE html>

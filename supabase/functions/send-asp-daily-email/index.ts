@@ -79,16 +79,18 @@ Deno.serve(async (req) => {
       .select('person_id, first_name, last_name, grade_level')
       .in('person_id', studentIds)
     
-    // Check today's attendance
+    // Check today's attendance from master_attendance
+    // Status codes 29, 30, 72 = absent in Veracross
     const todayDate = estTime.toISOString().split('T')[0]
     const { data: attendance } = await supabase
-      .from('attendance')
-      .select('person_id, status')
+      .from('master_attendance')
+      .select('person_id, student_attendance_status')
       .in('person_id', studentIds)
-      .eq('date', todayDate)
+      .eq('attendance_date', todayDate)
+      .in('student_attendance_status', [29, 30, 72])
     
     const absentStudents = new Set(
-      attendance?.filter(a => a.status === 'Absent').map(a => a.person_id) || []
+      attendance?.map(a => a.person_id) || []
     )
     
     const studentMap = new Map(students?.map(s => [s.person_id, s]) || [])
