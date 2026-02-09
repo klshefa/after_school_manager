@@ -62,6 +62,7 @@ export default function AdminPage() {
   // Sync state
   const [syncing, setSyncing] = useState(false)
   const [lastSync, setLastSync] = useState<string | null>(null)
+  const [lastAttendanceSync, setLastAttendanceSync] = useState<string | null>(null)
   const [lastSyncStats, setLastSyncStats] = useState<{
     classes_inserted?: number
     classes_updated?: number
@@ -144,6 +145,18 @@ export default function AdminPage() {
       if (classData?.last_vc_sync) {
         setLastSync(new Date(classData.last_vc_sync).toLocaleString())
       }
+    }
+    
+    // Get last attendance sync from master_attendance (most recent updated_at)
+    const { data: attendanceData } = await supabase
+      .from('master_attendance')
+      .select('updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (attendanceData?.updated_at) {
+      setLastAttendanceSync(new Date(attendanceData.updated_at).toLocaleString())
     }
     
     // Get last sync stats from audit log
@@ -557,21 +570,32 @@ export default function AdminPage() {
             
             <div className="space-y-4">
               {/* Last Sync Info */}
-              <div className="bg-slate-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-slate-600">
-                    <span className="font-medium">Last Sync:</span>{' '}
-                    {lastSync || 'Never'}
+              <div className="bg-slate-50 rounded-lg p-4 space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-sm text-slate-600">
+                      <span className="font-medium">Veracross Data:</span>{' '}
+                      {lastSync || 'Never'}
+                    </p>
+                    {lastSyncStats?.duration_ms && (
+                      <span className="text-xs text-slate-400">
+                        Completed in {(lastSyncStats.duration_ms / 1000).toFixed(1)}s
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Classes & enrollments synced daily at 8:15 AM ET
                   </p>
-                  {lastSyncStats?.duration_ms && (
-                    <span className="text-xs text-slate-400">
-                      Completed in {(lastSyncStats.duration_ms / 1000).toFixed(1)}s
-                    </span>
-                  )}
                 </div>
-                <p className="text-sm text-slate-500">
-                  Data is automatically synced daily at 8:15 AM ET from BigQuery
-                </p>
+                <div className="border-t border-slate-200 pt-3">
+                  <p className="text-sm text-slate-600">
+                    <span className="font-medium">Attendance Data:</span>{' '}
+                    {lastAttendanceSync || 'Never'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Updated every 15 minutes (6 AM - 4 PM ET)
+                  </p>
+                </div>
               </div>
               
               {/* Current Data Stats */}
