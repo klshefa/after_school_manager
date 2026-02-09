@@ -1,32 +1,21 @@
-import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
-
-// BigQuery connection via service account
-const BQ_PROJECT = 'vc-data-1-project'
-
-interface BQClass {
-  vc_class_id: string
-  class_name: string
-  instructor: string
-  meeting_times: string
-  school_year: string
-  min_grade: string
-  max_grade: string
-}
-
-interface BQEnrollment {
-  vc_class_id: string
-  student_person_id: number
-  fee_paid: boolean
-  notes: string | null
-}
 
 export async function POST(request: Request) {
   try {
-    // Create Supabase admin client
-    const supabase = createClient(
+    const cookieStore = await cookies()
+    
+    const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+        },
+      }
     )
     
     // For now, return a placeholder - actual BigQuery sync will be done via Edge Function

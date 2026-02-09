@@ -6,6 +6,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const APP_URL = Deno.env.get('APP_URL') || 'https://afterschool.shefaschool.org'
 
 interface ClassRoster {
+  classId: string
   className: string
   time: string
   students: {
@@ -112,6 +113,7 @@ Deno.serve(async (req) => {
         : nameParts[nameParts.length - 1].trim()
       
       return {
+        classId: cls.id,
         className: displayName,
         time: formatTime(cls.start_time, cls.end_time),
         students: classStudents
@@ -226,7 +228,7 @@ function buildEmailHtml(day: string, rosters: ClassRoster[], date: string): stri
           `
         }
         <p style="margin: 12px 0 0; font-size: 14px;">
-          <strong>${roster.students.filter(s => !s.isAbsent).length}</strong> students expected
+          <strong>${roster.students.length}</strong> students • <a href="${APP_URL}/class/${roster.classId}" style="color: #164a7a;">View/Edit in Portal</a>
         </p>
       </div>
     </div>

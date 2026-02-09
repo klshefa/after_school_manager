@@ -1,9 +1,11 @@
-import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY
 
 interface ClassRoster {
+  classId: string
   className: string
   dayOfWeek: string
   time: string
@@ -20,17 +22,18 @@ export async function POST(request: Request) {
   const isTest = searchParams.get('test') === 'true'
   
   try {
-    // Check for required env vars
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-      return NextResponse.json({ error: 'Supabase URL not configured' }, { status: 500 })
-    }
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      return NextResponse.json({ error: 'Service role key not configured' }, { status: 500 })
-    }
+    const cookieStore = await cookies()
     
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+        },
+      }
     )
     
     // Get today's day name
@@ -108,6 +111,7 @@ export async function POST(request: Request) {
         : nameParts[nameParts.length - 1].trim()
       
       return {
+        classId: cls.id,
         className: displayName,
         dayOfWeek: cls.day_of_week,
         time: formatTime(cls.start_time, cls.end_time),
@@ -210,7 +214,7 @@ function buildEmailHtml(day: string, rosters: ClassRoster[], isTest: boolean): s
         }
         <p style="margin: 12px 0 0; font-size: 14px;">
           <strong>${roster.students.length}</strong> students • 
-          <a href="${baseUrl}" style="color: #164a7a;">View/Edit in Portal</a>
+          <a href="${baseUrl}/class/${roster.classId}" style="color: #164a7a;">View/Edit in Portal</a>
         </p>
       </div>
     </div>
