@@ -92,12 +92,12 @@ export async function POST(request: Request) {
     
     // Check today's attendance from master_attendance
     // Status codes 29, 30, 72 = absent in Veracross
-    const today = new Date().toISOString().split('T')[0]
+    const todayDate = new Date().toISOString().split('T')[0]
     const { data: attendanceData } = await supabase
       .from('master_attendance')
       .select('person_id, student_attendance_status')
       .in('person_id', studentIds)
-      .eq('attendance_date', today)
+      .eq('attendance_date', todayDate)
       .in('student_attendance_status', [29, 30, 72])
     
     const absentStudents = new Set(attendanceData?.map(a => a.person_id) || [])
