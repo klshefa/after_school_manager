@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { BigQuery } from '@google-cloud/bigquery'
+import { SyncMonitor } from '@/lib/sync-monitor'
 
 // Initialize BigQuery client
 function getBigQueryClient() {
@@ -66,15 +67,30 @@ function extractClassName(programName: string): string {
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
+  const monitor = new SyncMonitor()
   
   try {
-    // Optional: verify cron secret
     const authHeader = request.headers.get('authorization')
     const cronSecret = process.env.CRON_SECRET
-    
+
     if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      // Allow manual triggers without cron secret for now
+
+    await monitor.syncComplete({
+      status: errors.length > 0 ? 'partial' : 'success',
+      records_processed: classRows.length + enrollmentRows.length,
+      records_created: classesInserted,
+      records_updated: classesUpdated + enrollmentsUpserted,
+      records_failed: errors.length,
+      metadata: {
+        classes_deactivated: classesDeactivated,
+        enrollments_deactivated: enrollmentsDeactivated,
+      },
+    })
+
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    await monitor.syncStart('asp-data-sync', 'bigquery')
     
     const bigquery = getBigQueryClient()
     const supabase = getSupabaseAdmin()
@@ -149,7 +165,6 @@ export async function POST(request: NextRequest) {
       const existingId = classIdMap.get(vcClassId)
       
       if (existingId) {
-        // Update existing class
         const { error } = await supabase
           .from('asp_classes')
           .update(classData)
@@ -161,7 +176,6 @@ export async function POST(request: NextRequest) {
           classesUpdated++
         }
       } else {
-        // Insert new class
         const { data: inserted, error } = await supabase
           .from('asp_classes')
           .insert(classData)
@@ -270,7 +284,32 @@ export async function POST(request: NextRequest) {
         duration_ms: Date.now() - startTime
       }
     })
-    
+
+    await monitor.syncComplete({
+      status: errors.length > 0 ? 'partial' : 'success',
+      records_processed: classRows.length + enrollmentRows.length,
+      records_created: classesInserted,
+      records_updated: classesUpdated + enrollmentsUpserted,
+      records_failed: errors.length,
+      metadata: {
+        classes_deactivated: classesDeactivated,
+        enrollments_deactivated: enrollmentsDeactivated,
+      },
+    })
+
+
+    await monitor.syncComplete({
+      status: errors.length > 0 ? 'partial' : 'success',
+      records_processed: classRows.length + enrollmentRows.length,
+      records_created: classesInserted,
+      records_updated: classesUpdated + enrollmentsUpserted,
+      records_failed: errors.length,
+      metadata: {
+        classes_deactivated: classesDeactivated,
+        enrollments_deactivated: enrollmentsDeactivated,
+      },
+    })
+
     return NextResponse.json({
       success: true,
       duration_ms: Date.now() - startTime,
@@ -291,6 +330,10 @@ export async function POST(request: NextRequest) {
     
   } catch (error) {
     console.error('Error syncing ASP data:', error)
+    await monitor.syncComplete({
+      status: 'failed',
+      error_message: error instanceof Error ? error.message : String(error),
+    })
     return NextResponse.json(
       { error: 'Failed to sync ASP data', details: String(error) },
       { status: 500 }

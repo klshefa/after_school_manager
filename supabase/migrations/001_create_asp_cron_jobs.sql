@@ -30,7 +30,8 @@ SELECT cron.schedule(
   SELECT net.http_post(
     url := 'https://afterschool.shefaschool.org/api/sync-asp-data',
     headers := jsonb_build_object(
-      'Content-Type', 'application/json'
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || current_setting('app.settings.cron_secret', true)
     ),
     body := '{}'::jsonb
   );

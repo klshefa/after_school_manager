@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { SyncMonitor } from '@/lib/sync-monitor'
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY
 
@@ -23,9 +24,10 @@ export async function POST(request: Request) {
   const { searchParams } = new URL(request.url)
   const isTest = searchParams.get('test') === 'true'
   
-  // Check if this is a cron call (has authorization header with cron secret)
   const authHeader = request.headers.get('authorization')
   const isCronCall = authHeader === `Bearer ${process.env.CRON_SECRET}`
+  const monitor = new SyncMonitor()
+  await monitor.syncStart('asp-daily-email', 'supabase', isCronCall ? 'scheduled' : 'manual')
   
   try {
     // Use service role for cron calls, user session for manual calls
@@ -175,14 +177,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Email send failed: ${error}` }, { status: 500 })
     }
     
+    const totalStudents = rosters.reduce((sum, r) => sum + r.students.length, 0)
+
+    await monitor.syncComplete({
+      status: 'success',
+      records_processed: rosters.length,
+      metadata: {
+        recipients: recipientEmails.length,
+        classes: rosters.length,
+        students: totalStudents,
+        is_test: isTest,
+      },
+    })
+
     return NextResponse.json({ 
       success: true, 
       sentTo: recipientEmails.join(', '),
       classCount: rosters.length,
-      totalStudents: rosters.reduce((sum, r) => sum + r.students.length, 0)
+      totalStudents,
     })
     
   } catch (error: any) {
+    await monitor.syncComplete({
+      status: 'failed',
+      error_message: error.message,
+    })
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
